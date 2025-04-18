@@ -9,34 +9,86 @@ app.use(cors());
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: '*', methods: ['GET', 'POST'] }
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST']
+  },
+  connectionStateRecovery: {
+    maxDisconnectionDuration: 30000,
+    skipMiddlewares: true
+  }
 });
 
-io.on('connection', socket => {
-  console.log('User connected:', socket.id);
+// Room management
+const rooms = new Map();
 
-  // Generate room on request
+io.on('connection', (socket) => {
+  console.log('Client connected:', socket.id);
+
+  // Create new room
   socket.on('create-room', () => {
-    const roomId = uuidv4().slice(0, 6);
+    const roomId = uuidv4().slice(0, 6).toUpperCase();
+    rooms.set(roomId, {
+      createdAt: Date.now(),
+      mobileConnected: false
+    });
     socket.join(roomId);
     socket.emit('room-created', roomId);
     console.log(`Room created: ${roomId}`);
   });
 
-  socket.on('join-room', roomId => {
+  // Join existing room
+  socket.on('join-room', (roomId) => {
+    if (!rooms.has(roomId)) {
+      socket.emit('error-message', 'Invalid room ID');
+      return;
+    }
+
     socket.join(roomId);
-    console.log(`Socket ${socket.id} joined room ${roomId}`);
+    console.log(`Client ${socket.id} joined room ${roomId}`);
   });
 
+  // Mobile device connection
+  socket.on('mobile-connect', (roomId) => {
+    if (!rooms.has(roomId)) {
+      socket.emit('error-message', 'Room not found');
+      return;
+    }
+
+    const room = rooms.get(roomId);
+    room.mobileConnected = true;
+    room.mobileSocketId = socket.id;
+    rooms.set(roomId, room);
+
+    io.to(roomId).emit('mobile-connected');
+    console.log(`Mobile device connected to room ${roomId}`);
+  });
+
+  // Motion data handling
   socket.on('send-motion', ({ roomId, y }) => {
-    socket.to(roomId).emit('receive-motion', { y });
+    if (rooms.has(roomId)) {
+      io.to(roomId).emit('receive-motion', { y });
+    }
   });
 
+  // Cleanup on disconnect
   socket.on('disconnect', () => {
-    console.log('User disconnected:', socket.id);
+    console.log('Client disconnected:', socket.id);
+    
+    // Check if this was a mobile device and update room status
+    for (const [roomId, room] of rooms.entries()) {
+      if (room.mobileSocketId === socket.id) {
+        room.mobileConnected = false;
+        room.mobileSocketId = null;
+        rooms.set(roomId, room);
+        io.to(roomId).emit('mobile-disconnected');
+        console.log(`Mobile device disconnected from room ${roomId}`);
+      }
+    }
   });
 });
 
-server.listen(3001, () => {
-  console.log('Server running at http://localhost:3001');
+const PORT = process.env.PORT || 3001;
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
