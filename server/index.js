@@ -32,9 +32,13 @@ const io = new Server(server, {
     credentials: true
   },
   path: '/socket.io/',
+  pingInterval: 10000, // More frequent pings
+  pingTimeout: 5000,   // Faster disconnect detection
+  transports: ['websocket'], // Force websocket only for less overhead
+  perMessageDeflate: true,   // Enable compression
   connectionStateRecovery: {
     maxDisconnectionDuration: 30000,
-    skipMiddlewares: true
+    skipMiddlewares: true,
   }
 });
 
@@ -42,11 +46,13 @@ const io = new Server(server, {
 const rooms = new Map();
 
 // Game constants
+ // Add this at the top of your server file where other constants are defined
+ const PADDLE_MOVE_BUFFER_SIZE = 5;
 const GAME_WIDTH = 100;
 const GAME_HEIGHT = 100;
 const BALL_RADIUS = 3;
 const PADDLE_HEIGHT = 20;
-const BALL_SPEED = 1.5;
+const BALL_SPEED = 1.2;
 
 // Game loop interval (ms)
 const GAME_TICK = 16;
@@ -55,7 +61,7 @@ io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
 
   socket.on('create-room', () => {
-    const roomId = uuidv4().slice(0, 6).toUpperCase();
+    const roomId = uuidv4().slice(0, 1).toUpperCase();
     
     // Initialize game state
     const gameState = {
@@ -136,18 +142,45 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('paddle-move', ({ roomId, playerSide, y }) => {
+  socket.on('paddle-move', ({ roomId, playerSide, y, timestamp }) => {
     if (!rooms.has(roomId)) return;
     
     const room = rooms.get(roomId);
+    
+    // Initialize move buffers if they don't exist
+    if (!room.leftPaddleMoves) {
+      room.leftPaddleMoves = [];
+      room.rightPaddleMoves = [];
+    }
+    
     const normalizedY = Math.max(0, Math.min(100, 50 - y * 3));
     
+    // Add move to appropriate buffer with timestamp
+    const moveData = { y: normalizedY, timestamp: timestamp || Date.now() };
+    
     if (playerSide === 'left') {
+      room.leftPaddleMoves.push(moveData);
+      
+      // Keep buffer at appropriate size
+      if (room.leftPaddleMoves.length > PADDLE_MOVE_BUFFER_SIZE) {
+        room.leftPaddleMoves.shift();
+      }
+      
+      // Set paddle position to latest value for immediate response
       room.gameState.leftPaddleY = normalizedY;
     } else if (playerSide === 'right') {
+      room.rightPaddleMoves.push(moveData);
+      
+      // Keep buffer at appropriate size
+      if (room.rightPaddleMoves.length > PADDLE_MOVE_BUFFER_SIZE) {
+        room.rightPaddleMoves.shift();
+      }
+      
+      // Set paddle position to latest value for immediate response
       room.gameState.rightPaddleY = normalizedY;
     }
   });
+
 
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
@@ -193,6 +226,7 @@ io.on('connection', (socket) => {
     }
   });
 });
+const MAX_SCORE = 10;
 
 // Game update logic
 function gameLoop(roomId) {
@@ -201,12 +235,26 @@ function gameLoop(roomId) {
   
   const state = room.gameState;
   const now = Date.now();
-  const deltaTime = (now - state.lastUpdateTime) / 1000; // Convert to seconds
+  const deltaTime = Math.min((now - state.lastUpdateTime) / 1000, 0.1); 
   state.lastUpdateTime = now;
   
-  // Update ball position
-  state.ballX += state.ballVelocityX * deltaTime * 60; // Normalize by 60fps
-  state.ballY += state.ballVelocityY * deltaTime * 60;
+  // Process paddle movement buffers to apply smoothing if needed
+  if (room.leftPaddleMoves && room.leftPaddleMoves.length > 0) {
+    // Just use the most recent value for responsiveness
+    state.leftPaddleY = room.leftPaddleMoves[room.leftPaddleMoves.length - 1].y;
+  }
+  
+  if (room.rightPaddleMoves && room.rightPaddleMoves.length > 0) {
+    // Just use the most recent value for responsiveness
+    state.rightPaddleY = room.rightPaddleMoves[room.rightPaddleMoves.length - 1].y;
+  }
+  
+  // Calculate frame factor (for consistent movement regardless of frame rate)
+  const frameFactor = deltaTime * 60;
+  
+  // Update ball position with frame normalization
+  state.ballX += state.ballVelocityX * frameFactor;
+  state.ballY += state.ballVelocityY * frameFactor;
   
   // Ball collision with top and bottom walls
   if (state.ballY - BALL_RADIUS <= 0 || state.ballY + BALL_RADIUS >= GAME_HEIGHT) {
@@ -243,21 +291,52 @@ function gameLoop(roomId) {
   }
   
   // Score points when ball hits left or right edge
-  if (state.ballX < 0) {
-    // Right player scores
+// Server-side fix (index.js) - Update the scoring logic
+if (state.ballX < 0) {
+  if (!state.gameOver) {
     state.score.right += 1;
+    if (state.score.right >= MAX_SCORE) {
+      state.gameOver = true;
+      state.winner = 'right';
+      state.gameRunning = false; // Add this line to stop the game
+    }
     resetBall(state, 'left');
-  } else if (state.ballX > GAME_WIDTH) {
-    // Left player scores
+  }
+} else if (state.ballX > GAME_WIDTH) {
+  if (!state.gameOver) {
     state.score.left += 1;
+    if (state.score.left >= MAX_SCORE) {
+      state.gameOver = true;
+      state.winner = 'left';
+      state.gameRunning = false; // Add this line to stop the game
+    }
     resetBall(state, 'right');
   }
+}
+
+
+
+
   
   // Send game state to all players
   io.to(roomId).emit('game-state', state);
 }
 
-// Reset ball after scoring
+io.on('connection', (socket) => {
+  // ... existing handlers ...
+
+  socket.on('restart-game', (roomId) => {
+    const room = rooms.get(roomId);
+    if (room) {
+      room.gameState.score = { left: 0, right: 0 };
+      room.gameState.gameOver = false;
+      resetBall(room.gameState, Math.random() > 0.5 ? 'left' : 'right');
+      io.to(roomId).emit('game-state', room.gameState);
+    }
+  });
+});
+
+// Fix resetBall function
 function resetBall(state, direction) {
   state.ballX = 50;
   state.ballY = 50;
