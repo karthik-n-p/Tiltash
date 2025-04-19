@@ -5,32 +5,28 @@ const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
 
 const app = express();
+
+// Allow all origins during development
 app.use(cors({
-  origin: [
-    'https://f56f-2409-40f3-201d-7849-70f7-f361-637c-bbcd.ngrok-free.app',
-    'http://localhost:3000' // Keep localhost for development
-  ],
+  origin: '*',
   methods: ['GET', 'POST'],
   credentials: true
 }));
 
 const server = http.createServer(app);
+
 const io = new Server(server, {
   cors: {
-    origin: [
-      'https://f56f-2409-40f3-201d-7849-70f7-f361-637c-bbcd.ngrok-free.app',
-      'http://localhost:3000'
-    ],
+    origin: '*', // Allow all origins (helpful when using changing ngrok URLs)
     methods: ['GET', 'POST'],
     credentials: true
   },
-  path: '/socket.io/', // Must match client path
+  path: '/socket.io/',
   connectionStateRecovery: {
     maxDisconnectionDuration: 30000,
     skipMiddlewares: true
   }
 });
-
 
 // Room management
 const rooms = new Map();
@@ -88,7 +84,6 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
     
-    // Check if this was a mobile device and update room status
     for (const [roomId, room] of rooms.entries()) {
       if (room.mobileSocketId === socket.id) {
         room.mobileConnected = false;

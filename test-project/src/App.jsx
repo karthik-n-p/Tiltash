@@ -2,11 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import io from 'socket.io-client';
 
 // Configure socket with proper Ngrok settings
-const socket = io('https://43ec-2409-40f3-201d-7849-70f7-f361-637c-bbcd.ngrok-free.app', {
+const socket = io('http://localhost:3001', {
   transports: ['websocket'],
-  secure: true,
-  rejectUnauthorized: false, // Needed for Ngrok's self-signed cert
-  path: '/socket.io/', // Ensure this matches your server path
+  path: '/socket.io/',
   withCredentials: true
 });
 
