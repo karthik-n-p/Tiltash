@@ -3,6 +3,58 @@ import io from 'socket.io-client';
 
 const socket = io('http://192.168.37.113:3001', { autoConnect: true });
 
+class MotionDetector {
+  constructor() {
+    this.onMotion = null;
+    this.ACCELERATION_THRESHOLD = 14;
+    this.COOLDOWN_MS = 100;
+    this.lastMotionTime = 0;
+    this.handleMotionEvent = this.handleMotionEvent.bind(this);
+  }
+
+  setOnMotion(onMotion) {
+    this.onMotion = onMotion;
+  }
+
+  start() {
+    if (typeof DeviceMotionEvent !== 'undefined') {
+      if (typeof DeviceMotionEvent.requestPermission === 'function') {
+        DeviceMotionEvent.requestPermission()
+          .then((response) => {
+            if (response === 'granted') {
+              window.addEventListener('devicemotion', this.handleMotionEvent, true);
+            }
+          })
+          .catch(console.error);
+      } else {
+        window.addEventListener('devicemotion', this.handleMotionEvent, true);
+      }
+    }
+  }
+
+  stop() {
+    window.removeEventListener('devicemotion', this.handleMotionEvent, true);
+  }
+
+  handleMotionEvent(event) {
+    const acc = event.accelerationIncludingGravity;
+    if (!acc) return;
+
+    const now = Date.now();
+    if (now - this.lastMotionTime > this.COOLDOWN_MS) {
+      this.lastMotionTime = now;
+      if (this.onMotion) {
+        this.onMotion({
+          x: acc.x || 0,
+          y: acc.y || 0,
+          z: acc.z || 0,
+          total: Math.sqrt((acc.x || 0) ** 2 + (acc.y || 0) ** 2 + (acc.z || 0) ** 2)
+        });
+      }
+    }
+  }
+}
+
 function App() {
   const [roomId, setRoomId] = useState('');
   const [inputRoomId, setInputRoomId] = useState('');
@@ -11,21 +63,22 @@ function App() {
   const [motionData, setMotionData] = useState({ y: 0 });
   const ballRef = useRef(null);
   const velocity = useRef(0);
-  const position = useRef(200); // Initial position (middle of container)
+  const position = useRef(200);
   const requestRef = useRef();
+  const motionDetector = useRef(new MotionDetector());
 
   // 1. Detect device & setup socket
   useEffect(() => {
     const mobileCheck = /Mobi|Android/i.test(navigator.userAgent);
     setIsMobile(mobileCheck);
 
-    // Desktop: Create room immediately
     if (!mobileCheck) {
       socket.emit('create-room');
     }
 
     return () => {
       if (requestRef.current) cancelAnimationFrame(requestRef.current);
+      motionDetector.current.stop();
     };
   }, []);
 
@@ -42,13 +95,11 @@ function App() {
 
     const handleMobileConnected = () => {
       setIsConnected(true);
-      console.log('Mobile connected - starting game');
     };
 
     const handleMotionData = ({ y }) => {
       if (!isMobile) {
-        // Apply more sensitive motion control
-        velocity.current = -y * 3; // Increased multiplier for better response
+        velocity.current = -y * 3;
         setMotionData(prev => ({ ...prev, y }));
       }
     };
@@ -66,46 +117,41 @@ function App() {
     };
   }, [isMobile]);
 
-  // 3. Mobile: Motion sensor handler
+  // 3. Mobile: Motion detection
   useEffect(() => {
     if (isMobile && isConnected) {
-      const handleMotion = (e) => {
-        const y = e.accelerationIncludingGravity?.y || 0;
+      motionDetector.current.setOnMotion((acceleration) => {
+        // Use the Y-axis acceleration for vertical motion
+        const y = acceleration.y;
         socket.emit('send-motion', { roomId, y });
         setMotionData(prev => ({ ...prev, y }));
-      };
-
-      window.addEventListener('devicemotion', handleMotion);
-      return () => window.removeEventListener('devicemotion', handleMotion);
+      });
+      motionDetector.current.start();
+      
+      return () => motionDetector.current.stop();
     }
   }, [isMobile, isConnected, roomId]);
 
-  // 4. Desktop: Ball physics animation
+  // 4. Desktop: Ball physics
   useEffect(() => {
     if (!isMobile && isConnected) {
-      const containerHeight = 400; // Match your container height
-      const ballHeight = 64; // Match your ball size
+      const containerHeight = 400;
+      const ballHeight = 64;
 
       const animate = () => {
-        // Apply gravity
         velocity.current += 0.4;
-        
-        // Update position
         position.current += velocity.current;
         
-        // Floor collision (bottom)
         if (position.current >= containerHeight - ballHeight) {
           position.current = containerHeight - ballHeight;
-          velocity.current *= -0.7; // Bounce with energy loss
+          velocity.current *= -0.7;
         }
         
-        // Ceiling collision (top)
         if (position.current <= 0) {
           position.current = 0;
           velocity.current *= -0.5;
         }
 
-        // Apply to ball
         if (ballRef.current) {
           ballRef.current.style.transform = `translate(-50%, ${position.current}px)`;
         }
@@ -141,7 +187,6 @@ function App() {
           </div>
         ) : (
           <div className="relative w-full max-w-md h-96 bg-white rounded-lg shadow-md overflow-hidden">
-            {/* Ball element */}
             <div
               ref={ballRef}
               className="absolute w-16 h-16 rounded-full bg-gradient-to-br from-red-500 to-pink-500 shadow-lg"
@@ -154,7 +199,7 @@ function App() {
             <div className="absolute bottom-4 left-0 right-0 text-center">
               <p className="text-green-600 font-medium">Mobile connected!</p>
               <p className="text-sm text-gray-600">
-                Tilt strength: {Math.abs(motionData.y).toFixed(2)}
+                Motion strength: {Math.abs(motionData.y).toFixed(2)}
               </p>
             </div>
           </div>
@@ -190,18 +235,19 @@ function App() {
             <p className="font-mono">{roomId}</p>
           </div>
           <div className="bg-white p-4 rounded-lg shadow-md">
-            <p className="text-lg mb-4">Tilt your phone to control the ball</p>
+            <p className="text-lg mb-4">Move your phone up/down to control the ball</p>
             <div className="h-4 w-full bg-gray-200 rounded-full overflow-hidden">
               <div
                 className="h-full bg-blue-500 transition-all duration-100"
                 style={{
-                  width: `${Math.min(100, Math.abs(motionData.y * 30) + 10)}%`,
-                  marginLeft: motionData.y > 0 ? '0' : 'auto'
+                  width: `${Math.min(100, Math.abs(motionData.y * 15) + 10)}%`,
+                  marginLeft: 'auto',
+                  marginRight: 'auto'
                 }}
               />
             </div>
             <p className="mt-2 text-sm text-gray-600">
-              Current tilt: {motionData.y.toFixed(2)}
+              Vertical motion: {motionData.y.toFixed(2)}
             </p>
           </div>
         </div>
