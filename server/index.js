@@ -1,23 +1,33 @@
 const express = require('express');
-const http = require('http');
+const https = require('https');
+const fs = require('fs');
+const path = require('path');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 
-// Allow all origins during development
+// Read SSL certs from test-project/certs/
+const sslOptions = {
+  key: fs.readFileSync(path.join(__dirname, '../test-project/certs/key.pem')),
+  cert: fs.readFileSync(path.join(__dirname, '../test-project/certs/cert.pem'))
+};
+
+// Enable CORS
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST'],
   credentials: true
 }));
 
-const server = http.createServer(app);
+// Create HTTPS server
+const server = https.createServer(sslOptions, app);
 
+// Setup socket.io
 const io = new Server(server, {
   cors: {
-    origin: '*', // Allow all origins (helpful when using changing ngrok URLs)
+    origin: '*',
     methods: ['GET', 'POST'],
     credentials: true
   },
@@ -34,63 +44,52 @@ const rooms = new Map();
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
 
-  // Create new room
   socket.on('create-room', () => {
     const roomId = uuidv4().slice(0, 6).toUpperCase();
-    rooms.set(roomId, {
-      createdAt: Date.now(),
-      mobileConnected: false
-    });
+    rooms.set(roomId, { createdAt: Date.now(), mobileConnected: false });
     socket.join(roomId);
     socket.emit('room-created', roomId);
     console.log(`Room created: ${roomId}`);
   });
 
-  // Join existing room
   socket.on('join-room', (roomId) => {
     if (!rooms.has(roomId)) {
       socket.emit('error-message', 'Invalid room ID');
       return;
     }
-
     socket.join(roomId);
     console.log(`Client ${socket.id} joined room ${roomId}`);
   });
 
-  // Mobile device connection
   socket.on('mobile-connect', (roomId) => {
     if (!rooms.has(roomId)) {
       socket.emit('error-message', 'Room not found');
       return;
     }
-
     const room = rooms.get(roomId);
     room.mobileConnected = true;
     room.mobileSocketId = socket.id;
     rooms.set(roomId, room);
 
     io.to(roomId).emit('mobile-connected');
-    console.log(`Mobile device connected to room ${roomId}`);
+    console.log(`Mobile connected to room ${roomId}`);
   });
 
-  // Motion data handling
   socket.on('send-motion', ({ roomId, y }) => {
     if (rooms.has(roomId)) {
       io.to(roomId).emit('receive-motion', { y });
     }
   });
 
-  // Cleanup on disconnect
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
-    
     for (const [roomId, room] of rooms.entries()) {
       if (room.mobileSocketId === socket.id) {
         room.mobileConnected = false;
         room.mobileSocketId = null;
         rooms.set(roomId, room);
         io.to(roomId).emit('mobile-disconnected');
-        console.log(`Mobile device disconnected from room ${roomId}`);
+        console.log(`Mobile disconnected from room ${roomId}`);
       }
     }
   });
@@ -98,5 +97,5 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`✅ HTTPS server running at https://localhost:${PORT}`);
 });
