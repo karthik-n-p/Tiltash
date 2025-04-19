@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import io from 'socket.io-client';
 
 // Configure socket with proper Ngrok settings
-const socket = io('http://localhost:3001', {
+const socket = io('https://game-x-backend-red.vercel.app/', {
   transports: ['websocket'],
   path: '/socket.io/',
   withCredentials: true
