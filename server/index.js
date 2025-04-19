@@ -5,19 +5,32 @@ const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: [
+    'https://f56f-2409-40f3-201d-7849-70f7-f361-637c-bbcd.ngrok-free.app',
+    'http://localhost:3000' // Keep localhost for development
+  ],
+  methods: ['GET', 'POST'],
+  credentials: true
+}));
 
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: '*',
-    methods: ['GET', 'POST']
+    origin: [
+      'https://f56f-2409-40f3-201d-7849-70f7-f361-637c-bbcd.ngrok-free.app',
+      'http://localhost:3000'
+    ],
+    methods: ['GET', 'POST'],
+    credentials: true
   },
+  path: '/socket.io/', // Must match client path
   connectionStateRecovery: {
     maxDisconnectionDuration: 30000,
     skipMiddlewares: true
   }
 });
+
 
 // Room management
 const rooms = new Map();
