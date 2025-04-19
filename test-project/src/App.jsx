@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import io from 'socket.io-client';
 
 // Configure socket with proper Ngrok settings
-const socket = io('http://localhost:3001', {
+const socket = io('https://192.168.37.113:3001', {
+  secure:true,
   transports: ['websocket'],
   path: '/socket.io/',
   withCredentials: true
