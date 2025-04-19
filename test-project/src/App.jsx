@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import io from 'socket.io-client';
 
-const socket = io('https://192.168.1.10:3001', {
+const socket = io('https://192.168.1.9:3001', {
   secure: true,
   transports: ['websocket'],
   path: '/socket.io/',
@@ -53,6 +53,7 @@ function App() {
   const requestRef = useRef();
   const previousY = useRef(0);
   const threshold = 0.5;
+  const wakeLockRef = useRef(null);
 
   // Load sound files
   useEffect(() => {
@@ -61,6 +62,32 @@ function App() {
       SOUNDS[key].load();
     });
   }, []);
+
+  // Wake lock to prevent screen from sleeping
+  useEffect(() => {
+    const requestWakeLock = async () => {
+      if (isConnected && isMobile && 'wakeLock' in navigator) {
+        try {
+          wakeLockRef.current = await navigator.wakeLock.request('screen');
+          console.log('Wake Lock active');
+        } catch (err) {
+          console.log('Wake Lock error:', err);
+        }
+      }
+    };
+
+    requestWakeLock();
+
+    // Release wake lock when component unmounts or disconnects
+    return () => {
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release()
+          .then(() => console.log('Wake Lock released'))
+          .catch((err) => console.log('Wake Lock release error:', err));
+        wakeLockRef.current = null;
+      }
+    };
+  }, [isConnected, isMobile]);
 
   const playSound = (sound) => {
     if (soundEnabled && SOUNDS[sound]) {
@@ -238,9 +265,18 @@ function App() {
     }
   };
 
-  // Helper function for player color
+  const handlePlayAgain = () => {
+    playSound('button');
+    socket.emit('restart-game', roomId);
+  };
+
+  // Get color based on player side
   const getPlayerColor = (side) => {
     return side === 'left' ? '#FF6B6B' : '#4ECDC4';
+  };
+
+  const getPlayerName = (side) => {
+    return side === 'left' ? 'RED TEAM' : 'CYAN TEAM';
   };
 
   // Desktop UI (Game Field) - Retro Style
@@ -477,104 +513,156 @@ function App() {
     );
   }
 
-  // Mobile UI (Controller) - Retro Style
+  // Mobile UI (Controller) - Retro Style with improved team identification and game over screen
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gray-900 p-4">
       {!isConnected ? (
-         <div className="bg-gray-800 p-6 rounded-xl border-2 border-cyan-500 max-w-md w-full">
-         <h1 className="text-2xl font-bold text-center text-cyan-300 mb-6 font-mono">
-           AIR HOCKEY CONTROLLER
-         </h1>
-         
-         <div className="relative mb-6">
-           <input
-             type="text"
-             value={inputRoomId}
-             onChange={(e) => setInputRoomId(e.target.value.toUpperCase())}
-             placeholder="ENTER CODE"
-             className="w-full px-4 py-3 text-center font-mono bg-gray-700 text-cyan-300 rounded-lg border border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-400"
-             maxLength={6}
-           />
-         </div>
- 
-         <button
-           onClick={handleJoin}
-           className="w-full bg-cyan-600 text-white py-3 rounded-lg font-medium hover:bg-cyan-500 transition-colors flex items-center justify-center"
-         >
-           <span className="mr-2">CONNECT</span>
-           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
-           </svg>
-         </button>
-       </div>
+        <div className="bg-gray-800 p-6 rounded-xl border-2 border-cyan-500 max-w-md w-full">
+          <h1 className="text-2xl font-bold text-center text-cyan-300 mb-6 font-mono">
+            AIR HOCKEY CONTROLLER
+          </h1>
+          
+          <div className="relative mb-6">
+            <input
+              type="text"
+              value={inputRoomId}
+              onChange={(e) => setInputRoomId(e.target.value.toUpperCase())}
+              placeholder="ENTER CODE"
+              className="w-full px-4 py-3 text-center font-mono bg-gray-700 text-cyan-300 rounded-lg border border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-400"
+              maxLength={6}
+            />
+          </div>
+  
+          <button
+            onClick={handleJoin}
+            className="w-full bg-cyan-600 text-white py-3 rounded-lg font-medium hover:bg-cyan-500 transition-colors flex items-center justify-center"
+          >
+            <span className="mr-2">CONNECT</span>
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+            </svg>
+          </button>
+        </div>
       ) : (
         <div className="w-full max-w-md">
-        <div className="bg-gray-800 p-4 rounded-xl border-2 border-cyan-500 mb-4">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center">
-              <div className={`w-3 h-3 rounded-full mr-2 ${playerSide === 'left' ? 'bg-red-500' : 'bg-cyan-500'}`} />
-              <span className="text-sm font-mono text-gray-300">
-                {playerSide === 'left' ? 'RED TEAM' : 'CYAN TEAM'}
-              </span>
-            </div>
-            <button 
-              onClick={() => setSoundEnabled(!soundEnabled)}
-              className="text-gray-400 hover:text-white transition-colors"
-            >
-              {soundEnabled ? '🔊' : '🔇'}
-            </button>
+          {/* Team Banner - More prominent team identification */}
+          <div 
+            className={`w-full py-2 mb-4 rounded-t-xl text-center font-bold text-xl font-mono shadow-lg ${
+              playerSide === 'left' 
+                ? 'bg-red-600 text-white border-red-700' 
+                : 'bg-cyan-600 text-white border-cyan-700'
+            }`}
+            style={{
+              boxShadow: `0 0 15px 2px ${playerSide === 'left' ? 'rgba(239, 68, 68, 0.7)' : 'rgba(45, 212, 191, 0.7)'}`
+            }}
+          >
+            YOU ARE {playerSide === 'left' ? 'RED TEAM' : 'CYAN TEAM'}
           </div>
 
-          <div className="bg-gray-700 p-3 rounded-lg mb-4">
-            <div className="flex justify-between items-center">
-              <div className="text-center">
-                <div className="text-red-500 font-mono text-2xl">{gameState.score.left}</div>
-                <div className="text-xs text-gray-400">PLAYER 1</div>
+          <div className="bg-gray-800 p-4 rounded-xl border-2 border-cyan-500">
+            <div className="flex items-center justify-between mb-4">
+              <div className="text-sm font-mono text-gray-300">
+                Room: <span className="text-cyan-300">{roomId}</span>
               </div>
-              <div className="text-gray-400 text-xl">VS</div>
-              <div className="text-center">
-                <div className="text-cyan-400 font-mono text-2xl">{gameState.score.right}</div>
-                <div className="text-xs text-gray-400">PLAYER 2</div>
-              </div>
+              <button 
+                onClick={() => setSoundEnabled(!soundEnabled)}
+                className="text-gray-400 hover:text-white transition-colors"
+              >
+                {soundEnabled ? '🔊' : '🔇'}
+              </button>
             </div>
-          </div>
 
-          <div className="bg-gray-700 p-4 rounded-lg text-center">
-            <div className="text-sm text-cyan-300 mb-2">TILT TO MOVE</div>
-            <div className="h-2 w-full bg-gray-600 rounded-full overflow-hidden">
-              <div 
-                className="h-full bg-cyan-500 transition-all duration-100"
-                style={{
-                  width: `${Math.min(100, Math.abs((gameState[`${playerSide}PaddleY`] - 50) * 2))}%`,
-                  marginLeft: `${playerSide === 'left' ? '0' : 'auto'}`     }}
-                  />
+            <div className="bg-gray-900 p-3 rounded-lg mb-4">
+              <div className="flex justify-between items-center">
+                <div className="text-center">
+                  <div className={`text-red-500 font-mono text-2xl ${playerSide === 'left' ? 'font-bold glow-text-red' : ''}`}>
+                    {gameState.score.left}
+                  </div>
+                  <div className={`text-xs ${playerSide === 'left' ? 'text-red-300' : 'text-gray-400'}`}>
+                    {playerSide === 'left' ? 'YOU' : 'OPP'}
+                  </div>
+                </div>
+                <div className="text-gray-400 text-xl font-bold">VS</div>
+                <div className="text-center">
+                  <div className={`text-cyan-400 font-mono text-2xl ${playerSide === 'right' ? 'font-bold glow-text-cyan' : ''}`}>
+                    {gameState.score.right}
+                  </div>
+                  <div className={`text-xs ${playerSide === 'right' ? 'text-cyan-300' : 'text-gray-400'}`}>
+                    {playerSide === 'right' ? 'YOU' : 'OPP'}
+                  </div>
                 </div>
               </div>
             </div>
-    
-            <div className="text-center text-sm text-gray-400">
-              <p>First to {maxScore} points wins</p>
-              <p className="mt-1">Room: {roomId}</p>
-            </div>
+
+            {!gameState.gameOver ? (
+              <div className="bg-gray-700 p-4 rounded-lg text-center">
+                <div 
+                  className="text-base font-bold mb-2"
+                  style={{ color: playerSide === 'left' ? '#FF6B6B' : '#4ECDC4' }}
+                >
+                  TILT TO MOVE
+                </div>
+                <div className="h-4 w-full bg-gray-900 rounded-full overflow-hidden mb-2">
+                  <div 
+                    className={`h-full transition-all duration-100 ${playerSide === 'left' ? 'bg-red-500' : 'bg-cyan-500'}`}
+                    style={{
+                      width: `${Math.min(100, Math.abs((gameState[`${playerSide}PaddleY`] - 50) * 2))}%`,
+                      marginLeft: `${playerSide === 'left' ? '0' : 'auto'}`
+                    }}
+                  />
+                </div>
+                <div className="w-full h-20 relative bg-gray-900 rounded-lg overflow-hidden">
+                  <div 
+                    className={`absolute w-3 h-16 rounded-full ${playerSide === 'left' ? 'left-2 bg-red-500' : 'right-2 bg-cyan-500'}`}
+                    style={{ 
+                      top: `${gameState[`${playerSide}PaddleY`]}%`, 
+                      transform: 'translateY(-50%)',
+                      boxShadow: `0 0 8px 2px ${playerSide === 'left' ? 'rgba(239, 68, 68, 0.7)' : 'rgba(45, 212, 191, 0.7)'}`
+                    }}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="bg-gray-900 p-6 rounded-lg text-center game-over-mobile">
+                <div className="text-4xl mb-3">🏆</div>
+                <h2 
+                  className="text-2xl font-bold mb-4 font-mono"
+                  style={{ 
+                    color: gameState.winner === 'left' ? '#FF6B6B' : '#4ECDC4',
+                    textShadow: `0 0 10px ${gameState.winner === 'left' ? 'rgba(239, 68, 68, 0.7)' : 'rgba(45, 212, 191, 0.7)'}`
+                  }}
+                >
+                  {gameState.winner === playerSide ? 'YOU WON!' : 'YOU LOST!'}
+                </h2>
+                <div className="text-xl font-bold mb-6 font-mono">
+                  <span className="text-red-500">{gameState.score.left}</span>
+                  <span className="mx-2 text-gray-400">-</span>
+                  <span className="text-cyan-400">{gameState.score.right}</span>
+                </div>
+                <button
+                  onClick={handlePlayAgain}
+                  className="w-full bg-yellow-500 text-black px-6 py-3 rounded-lg text-lg font-mono hover:bg-yellow-400 transition-all transform hover:scale-105 font-bold retro-button"
+                >
+                  PLAY AGAIN
+                </button>
+              </div>
+            )}
           </div>
+    
+          <div className="text-center text-xs text-gray-400 mt-3">
+            <p>First to {maxScore} points wins</p>
+          </div>
+        </div>
       )}
       
       {/* CSS for retro mobile effects */}
       <style jsx>{`
-        .digital-glow-red {
-          text-shadow: 0 0 10px rgba(239, 68, 68, 0.7);
+        .glow-text-red {
+          text-shadow: 0 0 6px rgba(239, 68, 68, 0.7);
         }
         
-        .digital-glow-teal {
-          text-shadow: 0 0 10px rgba(45, 212, 191, 0.7);
-        }
-        
-        .glow-small-red {
-          box-shadow: 0 0 5px 2px rgba(239, 68, 68, 0.5);
-        }
-        
-        .glow-small-teal {
-          box-shadow: 0 0 5px 2px rgba(45, 212, 191, 0.5);
+        .glow-text-cyan {
+          text-shadow: 0 0 6px rgba(45, 212, 191, 0.7);
         }
         
         .controller-bg {
