@@ -232,12 +232,16 @@ const MAX_SCORE = 10;
 function gameLoop(roomId) {
   const room = rooms.get(roomId);
   if (!room || !room.gameState.gameRunning) return;
-  
   const state = room.gameState;
   const now = Date.now();
   const deltaTime = Math.min((now - state.lastUpdateTime) / 1000, 0.1); 
   state.lastUpdateTime = now;
-  
+
+  const frameFactor = deltaTime * 60;
+  state.ballX += state.ballVelocityX * frameFactor;
+  state.ballY += state.ballVelocityY * frameFactor;
+
+
   // Process paddle movement buffers to apply smoothing if needed
   if (room.leftPaddleMoves && room.leftPaddleMoves.length > 0) {
     // Just use the most recent value for responsiveness
@@ -249,13 +253,7 @@ function gameLoop(roomId) {
     state.rightPaddleY = room.rightPaddleMoves[room.rightPaddleMoves.length - 1].y;
   }
   
-  // Calculate frame factor (for consistent movement regardless of frame rate)
-  const frameFactor = deltaTime * 60;
-  
-  // Update ball position with frame normalization
-  state.ballX += state.ballVelocityX * frameFactor;
-  state.ballY += state.ballVelocityY * frameFactor;
-  
+
   // Ball collision with top and bottom walls
   if (state.ballY - BALL_RADIUS <= 0 || state.ballY + BALL_RADIUS >= GAME_HEIGHT) {
     state.ballVelocityY *= -1;
@@ -325,15 +323,37 @@ if (state.ballX < 0) {
 io.on('connection', (socket) => {
   // ... existing handlers ...
 
-  socket.on('restart-game', (roomId) => {
-    const room = rooms.get(roomId);
-    if (room) {
-      room.gameState.score = { left: 0, right: 0 };
-      room.gameState.gameOver = false;
-      resetBall(room.gameState, Math.random() > 0.5 ? 'left' : 'right');
-      io.to(roomId).emit('game-state', room.gameState);
+ // In your server code (index.js)
+ socket.on('restart-game', (roomId) => {
+  const room = rooms.get(roomId);
+  if (room) {
+    // Clear any existing game loop
+    if (room.gameLoopInterval) {
+      clearInterval(room.gameLoopInterval);
     }
-  });
+
+    // Reset game state
+    room.gameState = {
+      leftPaddleY: 50,
+      rightPaddleY: 50,
+      ballX: 50,
+      ballY: 50,
+      ballVelocityX: BALL_SPEED * (Math.random() > 0.5 ? 1 : -1),
+      ballVelocityY: BALL_SPEED * (Math.random() * 2 - 1),
+      score: { left: 0, right: 0 },
+      gameOver: false,
+      winner: null,
+      lastScorer: null,
+      gameRunning: true,
+      lastUpdateTime: Date.now()  // Add this to ensure smooth movement
+    };
+
+    // Start new game loop
+    room.gameLoopInterval = setInterval(() => gameLoop(roomId), GAME_TICK);
+    
+    io.to(roomId).emit('game-state', room.gameState);
+  }
+});
 });
 
 // Fix resetBall function
