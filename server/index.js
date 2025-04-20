@@ -153,7 +153,7 @@ io.on('connection', (socket) => {
       room.rightPaddleMoves = [];
     }
     
-    const normalizedY = Math.max(0, Math.min(100, 50 - y * 3));
+    const normalizedY = Math.max(0, Math.min(100, 50 - y * 5));
     
     // Add move to appropriate buffer with timestamp
     const moveData = { y: normalizedY, timestamp: timestamp || Date.now() };

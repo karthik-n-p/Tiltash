@@ -1,0 +1,230 @@
+.arcade-cabinet {
+    background-image: linear-gradient(to bottom, #111, #000);
+  }
+  
+  .arcade-screen-container {
+    box-shadow: 0 0 40px rgba(255, 255, 0, 0.2);
+  }
+  
+  .arcade-logo {
+    position: relative;
+  }
+  
+  .arcade-glow {
+    text-shadow: 0 0 10px currentColor;
+  }
+  
+  .arcade-field {
+    border: 2px solid #333;
+    overflow: hidden;
+  }
+  
+  .arcade-grid {
+    background-image: 
+      linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+  
+  .arcade-button {
+    border: 2px solid #000;
+    border-radius: 0;
+    position: relative;
+    box-shadow: 0 4px 0 #000;
+    transition: all 0.1s ease;
+  }
+  
+  .arcade-button:active:not(:disabled) {
+    transform: translateY(4px);
+    box-shadow: 0 0 0 #000;
+  }
+  
+  .arcade-button:disabled {
+    opacity: 0.6;
+  }
+  
+  .scanlines {
+    background-image: linear-gradient(
+      to bottom,
+      rgba(255, 255, 255, 0),
+      rgba(255, 255, 255, 0) 50%,
+      rgba(0, 0, 0, 0.2) 50%,
+      rgba(0, 0, 0, 0.2)
+    );
+    background-size: 100% 4px;
+    height: 100%;
+    width: 100%;
+  }
+  
+  .pixel-font {
+    font-family: 'Press Start 2P', cursive, monospace;
+    letter-spacing: 1px;
+  }
+  
+  .pixel-font-bold {
+    font-family: 'Press Start 2P', cursive, monospace;
+    letter-spacing: 1px;
+    font-weight: bold;
+  }
+  
+  .pixel-corners {
+    clip-path: polygon(
+      0% 4px, 4px 0%, calc(100% - 4px) 0%, 100% 4px,
+      100% calc(100% - 4px), calc(100% - 4px) 100%, 4px 100%, 0% calc(100% - 4px)
+    );
+  }
+  
+  .pixel-button {
+    position: relative;
+    transition: all 0.2s;
+  }
+  
+  .pixel-button:active {
+    transform: translateY(2px);
+  }
+  
+  .blink-slow {
+    animation: blink 2s infinite;
+  }
+  
+  .blink-fast {
+    animation: blink 0.8s infinite;
+  }
+  
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  
+  .pixel-bg {
+    background-color: #000;
+    background-image: radial-gradient(#333 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+  
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+  
+  .animate-pulse {
+    animation: pulse 1.5s infinite;
+  }
+ 
+   body {
+     font-family: 'Press Start 2P', cursive, monospace;
+     background-color: #000;
+     margin: 0;
+     padding: 0;
+   }
+
+   .arcade-cabinet {
+    background-image: linear-gradient(to bottom, #111, #000);
+  }
+  
+  .arcade-screen-container {
+    box-shadow: 0 0 40px rgba(255, 255, 0, 0.2);
+  }
+  
+  .arcade-logo {
+    position: relative;
+  }
+  
+  .arcade-glow {
+    text-shadow: 0 0 10px currentColor;
+  }
+  
+  .arcade-field {
+    border: 2px solid #333;
+    overflow: hidden;
+  }
+  
+  .arcade-grid {
+    background-image: 
+      linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+  
+  .arcade-button {
+    border: 2px solid #000;
+    border-radius: 0;
+    position: relative;
+    box-shadow: 0 4px 0 #000;
+    transition: all 0.1s ease;
+  }
+  
+  .arcade-button:active:not(:disabled) {
+    transform: translateY(4px);
+    box-shadow: 0 0 0 #000;
+  }
+  
+  .arcade-button:disabled {
+    opacity: 0.6;
+  }
+  
+  .scanlines {
+    background-image: linear-gradient(
+      to bottom,
+      rgba(255, 255, 255, 0),
+      rgba(255, 255, 255, 0) 50%,
+      rgba(0, 0, 0, 0.2) 50%,
+      rgba(0, 0, 0, 0.2)
+    );
+    background-size: 100% 4px;
+    height: 100%;
+    width: 100%;
+  }
+  
+  .pixel-font {
+    font-family: 'Press Start 2P', cursive, monospace;
+    letter-spacing: 1px;
+  }
+  
+  .pixel-font-bold {
+    font-family: 'Press Start 2P', cursive, monospace;
+    letter-spacing: 1px;
+    font-weight: bold;
+  }
+  
+  .pixel-corners {
+    clip-path: polygon(
+      0% 4px, 4px 0%, calc(100% - 4px) 0%, 100% 4px,
+      100% calc(100% - 4px), calc(100% - 4px) 100%, 4px 100%, 0% calc(100% - 4px)
+    );
+  }
+  
+  .pixel-button {
+    position: relative;
+    transition: all 0.2s;
+  }
+  
+  .pixel-button:active {
+    transform: translateY(2px);
+  }
+  
+  .blink-slow {
+    animation: blink 2s infinite;
+  }
+  
+  .blink-fast {
+    animation: blink 0.8s infinite;
+  }
+  
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  
+  .score-display {
+    position: relative;
+    padding: 10px;
+    border: 2px solid #333;
+    background-color: rgba(0, 0, 0, 0.7);
+  }
+  
+  .pixel-bg {
+    background-color: #000;
+    background-image: radial-gradient(#333 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
