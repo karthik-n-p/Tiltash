@@ -5,7 +5,7 @@ import MobileController from './components/MobileController';
 import { initializeSounds, playSound } from './utils/sounds';
 
 // Create socket connection
-const socket = io('https://tdash-inky.vercel.app/', {
+const socket = io('https://gamex-rs46.onrender.com', {
   secure: true,
   transports: ['websocket'],
   path: '/socket.io/',
