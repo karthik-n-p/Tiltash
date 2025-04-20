@@ -10,8 +10,8 @@ const app = express();
 
 // Read SSL certs
 const sslOptions = {
-  key: fs.readFileSync(path.join(__dirname, '../test-project/certs/key.pem')),
-  cert: fs.readFileSync(path.join(__dirname, '../test-project/certs/cert.pem'))
+  key: fs.readFileSync(path.join(__dirname, '../client/certs/key.pem')),
+  cert: fs.readFileSync(path.join(__dirname, '../client/certs/cert.pem'))
 };
 
 // Enable CORS
