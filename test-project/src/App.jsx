@@ -193,6 +193,7 @@ function App() {
       toggleSound={toggleSound}
       roomId={roomId}
       socket={socket}
+      handleRestartGame={handleRestartGame}
     />
   ) : (
     <DesktopGame 

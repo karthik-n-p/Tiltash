@@ -11,7 +11,8 @@ const MobileController = ({
   soundEnabled,
   toggleSound,
   roomId,
-  socket
+  socket,
+  handleRestartGame
 }) => {
   const paddleRef = useRef(null);
   const previousY = useRef(0);
@@ -19,12 +20,10 @@ const MobileController = ({
   
   // Mobile motion detection
   useEffect(() => {
-    if (!isConnected || !playerSide) return;
+    if (!isConnected || !playerSide || gameState.gameOver) return;
 
     const handleMotion = (e) => {
       const y = e.accelerationIncludingGravity?.y || 0;
-
-      // Apply threshold to filter out small movements
       if (Math.abs(y - previousY.current) > threshold) {
         socket.emit('paddle-move', { roomId, playerSide, y });
         previousY.current = y;
@@ -33,43 +32,47 @@ const MobileController = ({
 
     window.addEventListener('devicemotion', handleMotion);
     return () => window.removeEventListener('devicemotion', handleMotion);
-  }, [isConnected, playerSide, roomId, socket]);
+  }, [isConnected, playerSide, roomId, socket, gameState.gameOver]);
 
   // Join Game UI
   if (!isConnected) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-gray-900 to-gray-800 p-4">
-        <div className="bg-gray-800 p-8 rounded-lg shadow-xl max-w-md w-full border-4 border-yellow-500">
-          <h1 className="text-3xl font-bold mb-4 text-center text-yellow-300 flex items-center justify-center font-mono">
-            <span className="mr-2">🕹️</span> RETRO AIR HOCKEY <span className="ml-2">🕹️</span>
-          </h1>
-          <p className="text-cyan-400 text-center mb-6 font-mono">ENTER THE ROOM CODE TO JOIN</p>
+      <div className="flex flex-col items-center justify-center min-h-screen bg-black p-4 pixel-bg">
+        <div className="bg-gray-900 p-6 rounded-lg border-4 border-yellow-400 max-w-md w-full pixel-corners">
+          <div className="text-center mb-6">
+            <h1 className="text-4xl font-bold text-yellow-400 mb-2 pixel-font">AIR HOCKEY</h1>
+            <p className="text-green-400 text-sm pixel-font">ARCADE EDITION</p>
+          </div>
           
-          <div className="relative mb-6">
+          <div className="mb-6">
             <input
               type="text"
               value={inputRoomId}
               onChange={(e) => setInputRoomId(e.target.value.toUpperCase())}
               placeholder="ENTER CODE"
-              className="w-full px-4 py-4 border-2 border-cyan-500 rounded-lg text-center font-mono text-xl focus:outline-none focus:ring-2 focus:ring-yellow-500 bg-gray-900 text-cyan-300"
+              className="w-full px-4 py-3 text-center bg-black text-green-400 border-2 border-yellow-400 
+                         pixel-font focus:outline-none pixel-corners"
               maxLength={6}
+              style={{ letterSpacing: '2px' }}
             />
-            <div className="absolute right-3 top-4 text-xl">🎮</div>
           </div>
           
-          <div className="flex justify-end mb-4">
-            <SoundToggle soundEnabled={soundEnabled} toggleSound={toggleSound} />
+          <div className="flex justify-between items-center mb-4">
+            <SoundToggle soundEnabled={soundEnabled} toggleSound={toggleSound} pixelStyle />
+            <div className="text-yellow-400 text-xs pixel-font">MAX: 2 PLAYERS</div>
           </div>
           
           <button
             onClick={handleJoin}
-            className="w-full bg-yellow-500 text-black py-4 rounded-lg font-bold text-lg hover:bg-yellow-400 transition-all transform hover:scale-105 shadow-lg flex items-center justify-center font-mono retro-button"
+            className="w-full bg-yellow-400 text-black py-3 pixel-font-bold pixel-corners
+                      hover:bg-yellow-300 transition-colors pixel-button"
           >
-            <span className="mr-2">INSERT COIN</span>
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
-            </svg>
+            START GAME
           </button>
+        </div>
+        
+        <div className="mt-8 text-gray-500 text-xs pixel-font">
+          TILT DEVICE TO CONTROL PADDLE
         </div>
       </div>
     );
@@ -77,160 +80,142 @@ const MobileController = ({
 
   // Controller UI
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-gray-900 to-gray-800 p-4">
-      <div className="text-center p-4 max-w-md w-full">
-        <div className="bg-gray-800 p-6 rounded-lg shadow-xl border-4 border-cyan-500 mb-6">
-          <div className="mb-4">
-            <p className="text-sm text-gray-400 uppercase tracking-wider font-mono">PLAYER</p>
-            <p className="text-3xl font-bold font-mono" style={{ 
-              color: playerSide === 'left' ? '#FF6B6B' : '#4ECDC4',
-              textShadow: playerSide === 'left' 
-                ? '0 0 10px rgba(239, 68, 68, 0.7)' 
-                : '0 0 10px rgba(45, 212, 191, 0.7)'
-            }}>
+    <div className="flex flex-col items-center justify-center min-h-screen bg-black p-4 pixel-bg">
+      <div className="w-full max-w-md">
+        {/* Game Header */}
+        <div className="bg-gray-900 p-4 mb-4 border-2 border-yellow-400 pixel-corners">
+          <div className="flex justify-between items-center">
+            <div className={`text-lg pixel-font ${playerSide === 'left' ? 'text-red-400' : 'text-blue-400'}`}>
               {playerSide === 'left' ? 'PLAYER 1' : 'PLAYER 2'}
-            </p>
-          </div>
-          
-          <div className="flex justify-end mb-2">
-            <SoundToggle soundEnabled={soundEnabled} toggleSound={toggleSound} />
-          </div>
-          
-          <div className="w-full h-64 rounded-lg flex items-center justify-center mb-6 relative overflow-hidden controller-bg" 
-            style={{ 
-              background: 'linear-gradient(135deg, #2D3748, #1A202C)',
-              borderWidth: '2px',
-              borderStyle: 'solid',
-              borderColor: playerSide === 'left' ? '#FF6B6B' : '#4ECDC4',
-              boxShadow: playerSide === 'left' 
-                ? '0 0 15px rgba(239, 68, 68, 0.5)' 
-                : '0 0 15px rgba(45, 212, 191, 0.5)'
-            }}
-          >
-            <div 
-              ref={paddleRef}
-              className="w-20 h-48 rounded-lg shadow-lg transform transition-transform controller-paddle"
-              style={{ 
-                backgroundColor: playerSide === 'left' ? '#FF6B6B' : '#4ECDC4',
-                boxShadow: playerSide === 'left' 
-                  ? '0 0 20px rgba(239, 68, 68, 0.7)' 
-                  : '0 0 20px rgba(45, 212, 191, 0.7)',
-                opacity: 0.9
-              }}
-            ></div>
-            
-            <div className="absolute bottom-4 left-0 right-0 flex justify-center">
-              <div className="text-sm px-3 py-1 rounded-full font-medium font-mono"
-                style={{ 
-                  backgroundColor: playerSide === 'left' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(45, 212, 191, 0.2)',
-                  color: playerSide === 'left' ? '#FF6B6B' : '#4ECDC4',
-                  border: '1px solid',
-                  borderColor: playerSide === 'left' ? '#FF6B6B' : '#4ECDC4',
-                }}
-              >
-                TILT TO MOVE
-              </div>
             </div>
+            <SoundToggle soundEnabled={soundEnabled} toggleSound={toggleSound} pixelStyle />
           </div>
-          
-          <div className="bg-gray-900 p-3 rounded-lg border border-gray-700">
-            <p className="text-lg font-medium mb-2 text-yellow-300 font-mono">SCORE</p>
-            <div className="flex justify-center items-center">
-              <div className="flex flex-col items-center p-2">
-                <div className="w-6 h-6 rounded-full bg-red-500 mb-1 glow-small-red"></div>
-                <p className="text-2xl font-bold text-red-500 font-mono digital-glow-red">{gameState.score.left}</p>
-              </div>
-              <div className="text-xl font-bold text-gray-400 mx-6 font-mono">VS</div>
-              <div className="flex flex-col items-center p-2">
-                <div className="w-6 h-6 rounded-full bg-cyan-500 mb-1 glow-small-teal"></div>
-                <p className="text-2xl font-bold text-cyan-400 font-mono digital-glow-teal">{gameState.score.right}</p>
-              </div>
-            </div>
-          </div>
-          
-          {/* Game Over Message for Mobile */}
-          {gameState.gameOver && (
-            <div className="mt-4 p-4 rounded-lg border-2 game-over-mobile" style={{ 
-              backgroundColor: gameState.winner === playerSide ? '#1E3A8A' : '#7F1D1D',
-              borderColor: gameState.winner === playerSide ? '#60A5FA' : '#EF4444'
-            }}>
-              <p className="font-bold font-mono" style={{
-                color: gameState.winner === playerSide ? '#60A5FA' : '#EF4444',
-                textShadow: gameState.winner === playerSide 
-                  ? '0 0 5px rgba(96, 165, 250, 0.7)' 
-                  : '0 0 5px rgba(239, 68, 68, 0.7)'
-              }}>
-                {gameState.winner === playerSide ? 'YOU WIN! 🏆' : 'GAME OVER'}
-              </p>
-              <p className="text-sm text-gray-300 font-mono">
-                {gameState.winner === playerSide 
-                  ? 'HIGH SCORE ACHIEVED!' 
-                  : 'INSERT COIN TO CONTINUE'}
-              </p>
-            </div>
-          )}
         </div>
         
-        <div className="p-3 bg-gray-800 bg-opacity-90 rounded-lg text-cyan-300 text-sm border border-gray-700">
-          <p className="font-medium font-mono">HOW TO PLAY:</p>
-          <p className="font-mono">TILT DEVICE TO MOVE PADDLE UP AND DOWN</p>
+        {/* Score Display */}
+        <div className="bg-gray-900 p-4 mb-4 border-2 border-yellow-400 pixel-corners">
+          <div className="flex justify-between items-center">
+            <div className="text-center">
+              <div className="text-red-400 text-3xl pixel-font-bold">{gameState.score.left}</div>
+              <div className="text-gray-400 text-xs pixel-font">P1</div>
+            </div>
+            <div className="text-yellow-400 text-sm pixel-font">VS</div>
+            <div className="text-center">
+              <div className="text-blue-400 text-3xl pixel-font-bold">{gameState.score.right}</div>
+              <div className="text-gray-400 text-xs pixel-font">P2</div>
+            </div>
+          </div>
         </div>
+        
+        {/* Controller Area */}
+        <div className="bg-gray-900 p-4 mb-4 border-2 border-yellow-400 pixel-corners">
+          <div className="h-48 relative bg-black mb-4 pixel-corners-inner">
+            <div 
+              ref={paddleRef}
+              className="absolute w-16 h-8 pixel-corners"
+              style={{
+                backgroundColor: playerSide === 'left' ? '#ef4444' : '#3b82f6',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)'
+              }}
+            ></div>
+          </div>
+          
+          <div className="text-center text-yellow-400 text-sm pixel-font mb-2">
+            TILT TO MOVE
+          </div>
+          
+          <div className="flex justify-center gap-4">
+            <button 
+              onClick={handleRestartGame}
+              className="bg-red-500 text-white px-4 py-2 pixel-font-bold pixel-corners pixel-button"
+              disabled={!gameState.gameOver}
+            >
+              RESTART
+            </button>
+          </div>
+        </div>
+        
+        {/* Room Info */}
+        <div className="bg-gray-900 p-3 text-center border-2 border-yellow-400 pixel-corners">
+          <div className="text-yellow-400 text-sm pixel-font">ROOM: {roomId}</div>
+        </div>
+        
+        {/* Game Over Overlay */}
+        {gameState.gameOver && (
+          <div className="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center p-4">
+            <div className="bg-gray-900 p-6 border-4 border-yellow-400 pixel-corners text-center">
+              <h2 className="text-3xl pixel-font-bold mb-4" style={{ 
+                color: gameState.winner === playerSide ? '#10B981' : '#EF4444',
+                textShadow: '0 0 8px currentColor'
+              }}>
+                {gameState.winner === playerSide ? 'YOU WIN!' : 'GAME OVER'}
+              </h2>
+              <div className="text-white text-lg pixel-font mb-6">
+                FINAL SCORE: {gameState.score.left} - {gameState.score.right}
+              </div>
+              <button
+                onClick={handleRestartGame}
+                className="bg-yellow-400 text-black px-6 py-3 pixel-font-bold pixel-corners pixel-button"
+              >
+                PLAY AGAIN
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <style jsx>{`
-        .digital-glow-red {
-          text-shadow: 0 0 10px rgba(239, 68, 68, 0.7);
-        }
-        
-        .digital-glow-teal {
-          text-shadow: 0 0 10px rgba(45, 212, 191, 0.7);
-        }
-        
-        .glow-small-red {
-          box-shadow: 0 0 5px 2px rgba(239, 68, 68, 0.5);
-        }
-        
-        .glow-small-teal {
-          box-shadow: 0 0 5px 2px rgba(45, 212, 191, 0.5);
-        }
-        
-        .controller-bg {
+        .pixel-bg {
           background-image: 
-            linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+            linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
           background-size: 20px 20px;
         }
         
-        .controller-paddle {
-          animation: pulse 2s infinite;
+        .pixel-font {
+          font-family: 'Press Start 2P', cursive, sans-serif;
+          letter-spacing: 1px;
         }
         
-        .game-over-mobile {
-          animation: fadeIn 0.5s;
+        .pixel-font-bold {
+          font-family: 'Press Start 2P', cursive, sans-serif;
+          letter-spacing: 1px;
+          font-weight: bold;
         }
         
-        .retro-button {
-          text-shadow: 1px 1px 0 rgba(0,0,0,0.3);
-          box-shadow: 0 4px 0 #B45309, 0 0 10px rgba(250, 204, 21, 0.5);
+        .pixel-corners {
+          border-radius: 0;
+          box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.3);
         }
         
-        .retro-button:active {
-          transform: translateY(4px);
-          box-shadow: 0 0 0 #B45309, 0 0 5px rgba(250, 204, 21, 0.5);
+        .pixel-corners-inner {
+          border-radius: 0;
         }
         
-        @keyframes pulse {
-          0%, 100% {
-            opacity: 0.9;
-          }
-          50% {
-            opacity: 0.7;
-          }
+        .pixel-button {
+          position: relative;
+          overflow: hidden;
+          border: 2px solid #000;
+          box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.3);
+          transition: all 0.1s ease;
         }
         
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
+        .pixel-button:active {
+          transform: translate(2px, 2px);
+          box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.3);
+        }
+        
+        .pixel-button:disabled {
+          opacity: 0.5;
+          transform: none;
+          box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.3);
+        }
+        
+        @keyframes blink {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
         }
       `}</style>
     </div>
