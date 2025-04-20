@@ -1,5 +1,5 @@
 import React from 'react';
-import GameBoard from './Gameboard';
+// import GameBoard from './Gameboard';
 import ScoreDisplay from './ScoreDisplay';
 import GameOverModal from './GameOverModal';
 import RoomCodeDisplay from './RoomCodeDisplay';
