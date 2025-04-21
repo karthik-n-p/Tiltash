@@ -60,7 +60,7 @@ function App() {
   useEffect(() => {
     const serverUrl = window.location.hostname === 'localhost' 
       ? 'ws://localhost:3001' 
-      : `wss://${window.location.hostname}`;
+      : `https://tiltash.onrender.com`;
     
     socketRef.current = new WebSocket(serverUrl);
     
