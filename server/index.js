@@ -1,18 +1,13 @@
 const express = require('express');
-const https = require('https');
+const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { Server } = require('socket.io');
 const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
+const WebSocket = require('ws');
+const url = require('url');
 
 const app = express();
-
-// Read SSL certs
-const sslOptions = {
-  key: fs.readFileSync(path.join(__dirname, '../client/certs/key.pem')),
-  cert: fs.readFileSync(path.join(__dirname, '../client/certs/cert.pem'))
-};
 
 // Enable CORS
 app.use(cors({
@@ -21,50 +16,232 @@ app.use(cors({
   credentials: true
 }));
 
-// Create HTTPS server
-const server = https.createServer(sslOptions, app);
+// Create HTTP server (no SSL for production readiness)
+const server = http.createServer(app);
 
-// Setup socket.io
-const io = new Server(server, {
-  cors: {
-    origin: '*',
-    methods: ['GET', 'POST'],
-    credentials: true
-  },
-  path: '/socket.io/',
-  pingInterval: 10000, // More frequent pings
-  pingTimeout: 5000,   // Faster disconnect detection
-  transports: ['websocket'], // Force websocket only for less overhead
-  perMessageDeflate: true,   // Enable compression
-  connectionStateRecovery: {
-    maxDisconnectionDuration: 30000,
-    skipMiddlewares: true,
-  }
-});
+// WebSocket server setup
+const wss = new WebSocket.Server({ server });
 
 // Room management
 const rooms = new Map();
 
 // Game constants
- // Add this at the top of your server file where other constants are defined
- const PADDLE_MOVE_BUFFER_SIZE = 5;
+const PADDLE_MOVE_BUFFER_SIZE = 5;
 const GAME_WIDTH = 100;
 const GAME_HEIGHT = 100;
 const BALL_RADIUS = 3;
 const PADDLE_HEIGHT = 20;
 const BALL_SPEED = 1.2;
+const MAX_SCORE = 10;
 
 // Game loop interval (ms)
 const GAME_TICK = 16;
 
-io.on('connection', (socket) => {
-  console.log('Client connected:', socket.id);
+// Client connections map to track socket info and rooms
+const clients = new Map();
 
-  socket.on('create-room', () => {
-    const roomId = uuidv4().slice(0, 1).toUpperCase();
+function sendToClient(client, type, data) {
+  if (client.readyState === WebSocket.OPEN) {
+    client.send(JSON.stringify({ type, data }));
+  }
+}
+
+function broadcastToRoom(roomId, type, data, excludeClient = null) {
+  const room = rooms.get(roomId);
+  if (!room) return;
+  
+  room.players.forEach((playerData, clientId) => {
+    const client = clients.get(clientId);
+    if (client && client !== excludeClient && client.readyState === WebSocket.OPEN) {
+      sendToClient(client, type, data);
+    }
+  });
+}
+
+wss.on('connection', (ws, req) => {
+  const id = uuidv4();
+  clients.set(id, ws);
+  console.log('Client connected:', id);
+  
+  // Parse query parameters
+  const parameters = url.parse(req.url, true).query;
+  const initialRoomId = parameters.roomId;
+  
+  // If roomId is provided in query params, attempt to join that room
+  if (initialRoomId && rooms.has(initialRoomId)) {
+    handleJoinRoom(ws, id, initialRoomId);
+  }
+
+  ws.on('message', (message) => {
+    try {
+      const { type, data } = JSON.parse(message);
+      
+      switch (type) {
+        case 'create-room':
+          handleCreateRoom(ws, id);
+          break;
+        case 'join-room':
+          handleJoinRoom(ws, id, data);
+          break;
+        case 'paddle-move':
+          handlePaddleMove(id, data);
+          break;
+        case 'restart-game':
+          handleRestartGame(data);
+          break;
+        default:
+          console.log('Unknown message type:', type);
+      }
+    } catch (error) {
+      console.error('Error processing message:', error);
+    }
+  });
+
+  ws.on('close', () => {
+    handleDisconnect(id);
+    clients.delete(id);
+    console.log('Client disconnected:', id);
+  });
+
+  // Add ping/pong for connection health monitoring
+  ws.isAlive = true;
+  ws.on('pong', () => {
+    ws.isAlive = true;
+  });
+});
+
+// Handle room creation
+function handleCreateRoom(ws, socketId) {
+  const roomId = uuidv4().slice(0, 6).toUpperCase();
+  
+  // Initialize game state
+  const gameState = {
+    leftPaddleY: 50,
+    rightPaddleY: 50,
+    ballX: 50,
+    ballY: 50,
+    ballVelocityX: BALL_SPEED * (Math.random() > 0.5 ? 1 : -1),
+    ballVelocityY: BALL_SPEED * (Math.random() * 2 - 1),
+    score: { left: 0, right: 0 },
+    leftPlayerConnected: false,
+    rightPlayerConnected: false,
+    gameRunning: false,
+    lastUpdateTime: Date.now()
+  };
+  
+  rooms.set(roomId, {
+    gameState,
+    createdAt: Date.now(),
+    hostSocketId: socketId,
+    players: new Map(),
+    gameLoopInterval: null,
+    leftPaddleMoves: [],
+    rightPaddleMoves: []
+  });
+  
+  // Add player to the room's players map
+  const room = rooms.get(roomId);
+  room.players.set(socketId, { roomId });
+  
+  sendToClient(ws, 'room-created', roomId);
+  console.log(`Room created: ${roomId}`);
+}
+
+// Handle room joining
+function handleJoinRoom(ws, socketId, roomId) {
+  if (!rooms.has(roomId)) {
+    sendToClient(ws, 'error-message', 'Invalid room ID');
+    return;
+  }
+  
+  const room = rooms.get(roomId);
+  
+  // Assign player to a side (left or right)
+  let playerSide = null;
+  
+  if (!room.gameState.leftPlayerConnected) {
+    playerSide = 'left';
+    room.gameState.leftPlayerConnected = true;
+  } else if (!room.gameState.rightPlayerConnected) {
+    playerSide = 'right';
+    room.gameState.rightPlayerConnected = true;
+  } else {
+    sendToClient(ws, 'error-message', 'Room is full');
+    return;
+  }
+  
+  // Add player to room
+  room.players.set(socketId, { side: playerSide, roomId });
+  
+  // Notify player about assigned side
+  sendToClient(ws, 'player-connected', playerSide);
+  console.log(`Player ${socketId} joined room ${roomId} as ${playerSide}`);
+  
+  // Start game if both players are connected
+  if (room.gameState.leftPlayerConnected && room.gameState.rightPlayerConnected) {
+    room.gameState.gameRunning = true;
     
-    // Initialize game state
-    const gameState = {
+    // Reset ball position
+    room.gameState.ballX = 50;
+    room.gameState.ballY = 50;
+    room.gameState.ballVelocityX = BALL_SPEED * (Math.random() > 0.5 ? 1 : -1);
+    room.gameState.ballVelocityY = BALL_SPEED * (Math.random() * 2 - 1);
+    
+    // Start game loop if not already running
+    if (!room.gameLoopInterval) {
+      room.gameLoopInterval = setInterval(() => gameLoop(roomId), GAME_TICK);
+    }
+    
+    // Broadcast initial game state
+    broadcastToRoom(roomId, 'game-state', room.gameState);
+    console.log(`Game started in room ${roomId}`);
+  }
+}
+
+// Handle paddle movement
+function handlePaddleMove(socketId, { roomId, playerSide, y, timestamp }) {
+  if (!rooms.has(roomId)) return;
+  
+  const room = rooms.get(roomId);
+  const normalizedY = Math.max(0, Math.min(100, 50 - y * 5));
+  
+  // Add move to appropriate buffer with timestamp
+  const moveData = { y: normalizedY, timestamp: timestamp || Date.now() };
+  
+  if (playerSide === 'left') {
+    room.leftPaddleMoves.push(moveData);
+    
+    // Keep buffer at appropriate size
+    if (room.leftPaddleMoves.length > PADDLE_MOVE_BUFFER_SIZE) {
+      room.leftPaddleMoves.shift();
+    }
+    
+    // Set paddle position to latest value for immediate response
+    room.gameState.leftPaddleY = normalizedY;
+  } else if (playerSide === 'right') {
+    room.rightPaddleMoves.push(moveData);
+    
+    // Keep buffer at appropriate size
+    if (room.rightPaddleMoves.length > PADDLE_MOVE_BUFFER_SIZE) {
+      room.rightPaddleMoves.shift();
+    }
+    
+    // Set paddle position to latest value for immediate response
+    room.gameState.rightPaddleY = normalizedY;
+  }
+}
+
+// Handle game restart
+function handleRestartGame(roomId) {
+  const room = rooms.get(roomId);
+  if (room) {
+    // Clear any existing game loop
+    if (room.gameLoopInterval) {
+      clearInterval(room.gameLoopInterval);
+    }
+
+    // Reset game state
+    room.gameState = {
       leftPaddleY: 50,
       rightPaddleY: 50,
       ballX: 50,
@@ -72,161 +249,65 @@ io.on('connection', (socket) => {
       ballVelocityX: BALL_SPEED * (Math.random() > 0.5 ? 1 : -1),
       ballVelocityY: BALL_SPEED * (Math.random() * 2 - 1),
       score: { left: 0, right: 0 },
-      leftPlayerConnected: false,
-      rightPlayerConnected: false,
-      gameRunning: false,
+      gameOver: false,
+      winner: null,
+      lastScorer: null,
+      gameRunning: true,
+      leftPlayerConnected: true,  // Keep existing player states
+      rightPlayerConnected: true, // Keep existing player states
       lastUpdateTime: Date.now()
     };
-    
-    rooms.set(roomId, {
-      gameState,
-      createdAt: Date.now(),
-      hostSocketId: socket.id,
-      players: new Map(),
-      gameLoopInterval: null
-    });
-    
-    socket.join(roomId);
-    socket.emit('room-created', roomId);
-    console.log(`Room created: ${roomId}`);
-  });
 
-  socket.on('join-room', (roomId) => {
-    if (!rooms.has(roomId)) {
-      socket.emit('error-message', 'Invalid room ID');
-      return;
-    }
+    // Start new game loop
+    room.gameLoopInterval = setInterval(() => gameLoop(roomId), GAME_TICK);
     
-    const room = rooms.get(roomId);
-    
-    // Assign player to a side (left or right)
-    let playerSide = null;
-    
-    if (!room.gameState.leftPlayerConnected) {
-      playerSide = 'left';
-      room.gameState.leftPlayerConnected = true;
-    } else if (!room.gameState.rightPlayerConnected) {
-      playerSide = 'right';
-      room.gameState.rightPlayerConnected = true;
-    } else {
-      socket.emit('error-message', 'Room is full');
-      return;
-    }
-    
-    // Add player to room
-    room.players.set(socket.id, { side: playerSide });
-    socket.join(roomId);
-    
-    // Notify player about assigned side
-    socket.emit('player-connected', playerSide);
-    console.log(`Player ${socket.id} joined room ${roomId} as ${playerSide}`);
-    
-    // Start game if both players are connected
-    if (room.gameState.leftPlayerConnected && room.gameState.rightPlayerConnected) {
-      room.gameState.gameRunning = true;
-      
-      // Reset ball position
-      room.gameState.ballX = 50;
-      room.gameState.ballY = 50;
-      room.gameState.ballVelocityX = BALL_SPEED * (Math.random() > 0.5 ? 1 : -1);
-      room.gameState.ballVelocityY = BALL_SPEED * (Math.random() * 2 - 1);
-      
-      // Start game loop if not already running
-      if (!room.gameLoopInterval) {
-        room.gameLoopInterval = setInterval(() => gameLoop(roomId), GAME_TICK);
-      }
-      
-      // Broadcast initial game state
-      io.to(roomId).emit('game-state', room.gameState);
-      console.log(`Game started in room ${roomId}`);
-    }
-  });
+    broadcastToRoom(roomId, 'game-state', room.gameState);
+  }
+}
 
-  socket.on('paddle-move', ({ roomId, playerSide, y, timestamp }) => {
-    if (!rooms.has(roomId)) return;
-    
-    const room = rooms.get(roomId);
-    
-    // Initialize move buffers if they don't exist
-    if (!room.leftPaddleMoves) {
-      room.leftPaddleMoves = [];
-      room.rightPaddleMoves = [];
+// Handle client disconnection
+function handleDisconnect(socketId) {
+  // Find which room this socket was in
+  for (const [roomId, room] of rooms.entries()) {
+    // Check if socket was a player
+    if (room.players.has(socketId)) {
+      const playerData = room.players.get(socketId);
+      const playerSide = playerData.side;
+      
+      // Mark player as disconnected
+      if (playerSide === 'left') {
+        room.gameState.leftPlayerConnected = false;
+      } else if (playerSide === 'right') {
+        room.gameState.rightPlayerConnected = false;
+      }
+      
+      room.players.delete(socketId);
+      
+      // Stop game if any player disconnects
+      if (room.gameLoopInterval) {
+        clearInterval(room.gameLoopInterval);
+        room.gameLoopInterval = null;
+      }
+      
+      room.gameState.gameRunning = false;
+      
+      // Notify remaining players about disconnection
+      broadcastToRoom(roomId, 'player-disconnected', playerSide);
+      broadcastToRoom(roomId, 'game-state', room.gameState);
+      
+      console.log(`Player ${playerSide} disconnected from room ${roomId}`);
     }
     
-    const normalizedY = Math.max(0, Math.min(100, 50 - y * 5));
-    
-    // Add move to appropriate buffer with timestamp
-    const moveData = { y: normalizedY, timestamp: timestamp || Date.now() };
-    
-    if (playerSide === 'left') {
-      room.leftPaddleMoves.push(moveData);
-      
-      // Keep buffer at appropriate size
-      if (room.leftPaddleMoves.length > PADDLE_MOVE_BUFFER_SIZE) {
-        room.leftPaddleMoves.shift();
+    // Clean up empty rooms
+    if (room.players.size === 0 && socketId === room.hostSocketId) {
+      if (room.gameLoopInterval) {
+        clearInterval(room.gameLoopInterval);
       }
-      
-      // Set paddle position to latest value for immediate response
-      room.gameState.leftPaddleY = normalizedY;
-    } else if (playerSide === 'right') {
-      room.rightPaddleMoves.push(moveData);
-      
-      // Keep buffer at appropriate size
-      if (room.rightPaddleMoves.length > PADDLE_MOVE_BUFFER_SIZE) {
-        room.rightPaddleMoves.shift();
-      }
-      
-      // Set paddle position to latest value for immediate response
-      room.gameState.rightPaddleY = normalizedY;
+      rooms.delete(roomId);
+      console.log(`Room ${roomId} deleted`);
     }
-  });
-
-
-  socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.id);
-    
-    // Find which room this socket was in
-    for (const [roomId, room] of rooms.entries()) {
-      // Check if socket was a player
-      if (room.players.has(socket.id)) {
-        const playerSide = room.players.get(socket.id).side;
-        
-        // Mark player as disconnected
-        if (playerSide === 'left') {
-          room.gameState.leftPlayerConnected = false;
-        } else if (playerSide === 'right') {
-          room.gameState.rightPlayerConnected = false;
-        }
-        
-        room.players.delete(socket.id);
-        
-        // Stop game if any player disconnects
-        if (room.gameLoopInterval) {
-          clearInterval(room.gameLoopInterval);
-          room.gameLoopInterval = null;
-        }
-        
-        room.gameState.gameRunning = false;
-        
-        // Notify remaining players about disconnection
-        io.to(roomId).emit('player-disconnected', playerSide);
-        io.to(roomId).emit('game-state', room.gameState);
-        
-        console.log(`Player ${playerSide} disconnected from room ${roomId}`);
-      }
-      
-      // Clean up empty rooms
-      if (room.players.size === 0 && socket.id === room.hostSocketId) {
-        if (room.gameLoopInterval) {
-          clearInterval(room.gameLoopInterval);
-        }
-        rooms.delete(roomId);
-        console.log(`Room ${roomId} deleted`);
-      }
-    }
-  });
-});
-const MAX_SCORE = 10;
+  }
+}
 
 // Game update logic
 function gameLoop(roomId) {
@@ -241,7 +322,6 @@ function gameLoop(roomId) {
   state.ballX += state.ballVelocityX * frameFactor;
   state.ballY += state.ballVelocityY * frameFactor;
 
-
   // Process paddle movement buffers to apply smoothing if needed
   if (room.leftPaddleMoves && room.leftPaddleMoves.length > 0) {
     // Just use the most recent value for responsiveness
@@ -252,7 +332,6 @@ function gameLoop(roomId) {
     // Just use the most recent value for responsiveness
     state.rightPaddleY = room.rightPaddleMoves[room.rightPaddleMoves.length - 1].y;
   }
-  
 
   // Ball collision with top and bottom walls
   if (state.ballY - BALL_RADIUS <= 0 || state.ballY + BALL_RADIUS >= GAME_HEIGHT) {
@@ -289,74 +368,33 @@ function gameLoop(roomId) {
   }
   
   // Score points when ball hits left or right edge
-// Server-side fix (index.js) - Update the scoring logic
-if (state.ballX < 0) {
-  if (!state.gameOver) {
-    state.score.right += 1;
-    if (state.score.right >= MAX_SCORE) {
-      state.gameOver = true;
-      state.winner = 'right';
-      state.gameRunning = false; // Add this line to stop the game
+  if (state.ballX < 0) {
+    if (!state.gameOver) {
+      state.score.right += 1;
+      if (state.score.right >= MAX_SCORE) {
+        state.gameOver = true;
+        state.winner = 'right';
+        state.gameRunning = false;
+      }
+      resetBall(state, 'left');
     }
-    resetBall(state, 'left');
-  }
-} else if (state.ballX > GAME_WIDTH) {
-  if (!state.gameOver) {
-    state.score.left += 1;
-    if (state.score.left >= MAX_SCORE) {
-      state.gameOver = true;
-      state.winner = 'left';
-      state.gameRunning = false; // Add this line to stop the game
+  } else if (state.ballX > GAME_WIDTH) {
+    if (!state.gameOver) {
+      state.score.left += 1;
+      if (state.score.left >= MAX_SCORE) {
+        state.gameOver = true;
+        state.winner = 'left';
+        state.gameRunning = false;
+      }
+      resetBall(state, 'right');
     }
-    resetBall(state, 'right');
   }
-}
-
-
-
-
   
   // Send game state to all players
-  io.to(roomId).emit('game-state', state);
+  broadcastToRoom(roomId, 'game-state', state);
 }
 
-io.on('connection', (socket) => {
-  // ... existing handlers ...
-
- // In your server code (index.js)
- socket.on('restart-game', (roomId) => {
-  const room = rooms.get(roomId);
-  if (room) {
-    // Clear any existing game loop
-    if (room.gameLoopInterval) {
-      clearInterval(room.gameLoopInterval);
-    }
-
-    // Reset game state
-    room.gameState = {
-      leftPaddleY: 50,
-      rightPaddleY: 50,
-      ballX: 50,
-      ballY: 50,
-      ballVelocityX: BALL_SPEED * (Math.random() > 0.5 ? 1 : -1),
-      ballVelocityY: BALL_SPEED * (Math.random() * 2 - 1),
-      score: { left: 0, right: 0 },
-      gameOver: false,
-      winner: null,
-      lastScorer: null,
-      gameRunning: true,
-      lastUpdateTime: Date.now()  // Add this to ensure smooth movement
-    };
-
-    // Start new game loop
-    room.gameLoopInterval = setInterval(() => gameLoop(roomId), GAME_TICK);
-    
-    io.to(roomId).emit('game-state', room.gameState);
-  }
-});
-});
-
-// Fix resetBall function
+// Reset ball function
 function resetBall(state, direction) {
   state.ballX = 50;
   state.ballY = 50;
@@ -364,7 +402,26 @@ function resetBall(state, direction) {
   state.ballVelocityY = BALL_SPEED * (Math.random() * 2 - 1);
 }
 
+// Health check interval for WebSocket connections
+const interval = setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.isAlive === false) return ws.terminate();
+    
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, 30000);
+
+wss.on('close', () => {
+  clearInterval(interval);
+});
+
+// Add basic route for checking server status
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', activeRooms: rooms.size, clients: wss.clients.size });
+});
+
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log(`✅ HTTPS server running at https://localhost:${PORT}`);
+  console.log(`✅ Server running at http://localhost:${PORT}`);
 });
