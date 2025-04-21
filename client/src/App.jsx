@@ -118,18 +118,19 @@ function App() {
   useEffect(() => {
     setIsMobile(/Mobi|Android/i.test(navigator.userAgent));
     
-    // Create room if on desktop and socket is connected
-    if (!isMobile && socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-      sendToServer('create-room');
-    }
-  }, []);
+  // Only auto-create room on desktop when socket is connected AND no room exists yet
+  if (!isMobile && socketRef.current && socketRef.current.readyState === WebSocket.OPEN && !roomId) {
+    sendToServer('create-room');
+  }
+}, [isMobile, roomId]); 
 
   // Monitor socket connection status and create room if needed
-  useEffect(() => {
-    if (!isMobile && isConnected) {
-      sendToServer('create-room');
-    }
-  }, [isMobile, isConnected]);
+// Update this useEffect as well
+useEffect(() => {
+  if (!isMobile && isConnected && !roomId) {
+    sendToServer('create-room');
+  }
+}, [isMobile, isConnected, roomId]);
 
   // Helper function to send messages to the server
   const sendToServer = (type, data = null) => {
