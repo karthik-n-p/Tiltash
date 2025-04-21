@@ -11,28 +11,28 @@ const MobileController = ({
   soundEnabled,
   toggleSound,
   roomId,
-  socket,
+  updatePaddlePosition, // Receive this instead of socket
   handleRestartGame
 }) => {
   const paddleRef = useRef(null);
   const previousY = useRef(0);
   const threshold = 0.5;
   
-  // Mobile motion detection
+  // Update the motion handler to use updatePaddlePosition instead of socket
   useEffect(() => {
     if (!isConnected || !playerSide || gameState.gameOver) return;
 
     const handleMotion = (e) => {
       const y = e.accelerationIncludingGravity?.y || 0;
       if (Math.abs(y - previousY.current) > threshold) {
-        socket.emit('paddle-move', { roomId, playerSide, y });
+        updatePaddlePosition(y); // Use the passed function
         previousY.current = y;
       }
     };
 
     window.addEventListener('devicemotion', handleMotion);
     return () => window.removeEventListener('devicemotion', handleMotion);
-  }, [isConnected, playerSide, roomId, socket, gameState.gameOver]);
+  }, [isConnected, playerSide, roomId, updatePaddlePosition, gameState.gameOver]);
 
   // Join Game UI (first section - onboarding)
   if (!isConnected) {
